@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Oracle of Images</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the Mystical Oracle theme */
+        :root {
+            --color-primary: #8e44ad; /* Deep Purple */
+            --color-secondary: #3498db; /* Blue/Mystical Teal */
+            --color-background: #190a2a; /* Very Dark Purple/Space */
+            --color-text: #ecf0f1; /* Off-white / Silver */
+            --color-card: #2c1a40; /* Darker card background */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--color-background);
+            color: var(--color-text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* Starry background effect */
+            background: radial-gradient(circle at center, #301947 0%, var(--color-background) 100%);
+        }
+        .container {
+            max-width: 90%;
+            width: 768px;
+        }
+        .card {
+            background-color: var(--color-card);
+            border: 4px solid var(--color-primary);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.7);
+            /* Add glow effect */
+            filter: drop-shadow(0 0 15px rgba(142, 68, 173, 0.6));
+        }
+        .dropzone {
+            border: 3px dashed var(--color-secondary);
+            transition: background-color 0.2s, border-color 0.2s;
+            background-color: #3b2857; /* Slightly lighter drop area */
+        }
+        .dropzone.dragover {
+            background-color: #5d3f82;
+            border-color: #ffffff;
+        }
+        .result-box {
+            min-height: 8rem;
+            max-height: 20rem;
+            overflow-y: auto;
+            border: 2px solid var(--color-secondary);
+            font-family: monospace; /* Keep message readable */
+        }
+        .glow-text {
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+        }
+    </style>
+    <script>
+        // --- Core Steganography Logic (Unchanged from previous functional version) ---
+        // NOTE: The technical code remains the same to ensure reliability, 
+        // only the user-facing messages have been changed.
+
+        const HINT_BITS = "10000010100100100010110001001100"; // LSB-first bit representation of "AI42"
+        const TERMINATOR_BITS = "00000000";
+
+        /**
+         * Converts a blob (image file) into a Uint8ClampedArray of pixel data (RGBA).
+         */
+        function getImageData(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                        resolve(imageData.data);
+                    } catch (error) {
+                        reject(new Error("The picture is too complicated for the Oracle to read."));
+                    }
+                };
+                img.onerror = (e) => reject(new Error("Failed to load image."));
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        /**
+         * Extracts LSBs ONLY from the Alpha channel, sequentially (A1, A2, A3...).
+         */
+        function extractLSBBitsAlphaOnly(data) {
+            let alphaBits = [];
+            for (let i = 3; i < data.length; i += 4) {
+                alphaBits.push(data[i] & 1);
+            }
+            return alphaBits.join('');
+        }
+
+        /**
+         * Reconstructs the message from the bit stream, requiring the "AI42" prefix.
+         */
+        function bitsToMessage(bits) {
+            // Require the AI42 hint
+            if (!bits.startsWith(HINT_BITS)) {
+                return null; 
+            }
+            
+            let start = HINT_BITS.length;
+            let payloadBits = bits.substring(start);
+
+            // Find the null terminator
+            let terminatorIndex = payloadBits.indexOf(TERMINATOR_BITS);
+
+            let payloadLengthBits;
+            if (terminatorIndex !== -1) {
+                payloadLengthBits = terminatorIndex;
+            } else {
+                const MAX_BITS = 24 * 1024 * 8; 
+                payloadLengthBits = Math.min(payloadBits.length, MAX_BITS);
+            }
+            
+            payloadLengthBits = Math.floor(payloadLengthBits / 8) * 8;
+            
+            if (payloadLengthBits === 0) {
+                return null;
+            }
+
+            payloadBits = payloadBits.substring(0, payloadLengthBits);
+            const byteValues = [];
+
+            for (let i = 0; i < payloadBits.length; i += 8) {
+                const byteStr = payloadBits.substring(i, i + 8);
+                const reversedByteStr = byteStr.split('').reverse().join('');
+                byteValues.push(parseInt(reversedByteStr, 2));
+            }
+
+            try {
+                const message = new TextDecoder('utf-8').decode(new Uint8Array(byteValues));
+                return message.trim();
+            } catch (e) {
+                // Return a generic 'unknown' message for kids instead of hex code
+                return "The Oracle found something, but it's written in an ancient, unknown language!";
+            }
+        }
+
+        // --- Extraction Orchestration (Simplified UI Messaging) ---
+
+        async function handleFile(file) {
+            if (!file) return;
+
+            const dropZone = document.getElementById('dropzone');
+            const statusDiv = document.getElementById('status');
+            const resultDiv = document.getElementById('result');
+
+            dropZone.classList.add('hidden');
+            statusDiv.classList.remove('hidden');
+            resultDiv.innerHTML = `<span class="text-gray-400">The Magic Crystal Ball is warming up...</span>`;
+
+            try {
+                statusDiv.textContent = "Gazing deep into the picture's secrets...";
+                const pixelData = await getImageData(file);
+
+                // Perform the single, high-confidence extraction
+                const bits = extractLSBBitsAlphaOnly(pixelData);
+                const message = bitsToMessage(bits);
+                
+                if (message) {
+                    // Success
+                    statusDiv.textContent = "The Oracle has revealed a secret!";
+                    resultDiv.classList.remove('bg-red-900', 'bg-opacity-50', 'text-red-300', 'bg-yellow-900', 'text-yellow-300');
+                    resultDiv.classList.add('bg-green-900', 'bg-opacity-50', 'text-green-300');
+                    resultDiv.innerHTML = `
+                        <p class="font-bold text-lg mb-2 glow-text">A Secret Message is Revealed!</p>
+                        <pre class="whitespace-pre-wrap p-2 border border-green-600 rounded text-sm">${message}</pre>
+                        <p class="text-xs mt-2 text-green-400">This was found using the secret Alpha Key.</p>
+                    `;
+                } else {
+                    // Failure
+                    statusDiv.textContent = "The Picture is Pure.";
+                    resultDiv.classList.remove('bg-green-900', 'bg-opacity-50', 'text-green-300', 'bg-yellow-900', 'text-yellow-300');
+                    resultDiv.classList.add('bg-red-900', 'bg-opacity-50', 'text-red-300');
+                    resultDiv.innerHTML = `
+                        <p class="font-bold text-lg mb-2">The Oracle sees nothing hidden!</p>
+                        <p class="text-sm">The picture is clear. No secret writing was found with the Alpha Key.</p>
+                    `;
+                }
+
+            } catch (error) {
+                statusDiv.textContent = "Uh Oh! Magic Error!";
+                resultDiv.classList.remove('bg-green-900', 'bg-opacity-50', 'text-green-300', 'bg-red-900', 'text-red-300');
+                resultDiv.classList.add('bg-yellow-900', 'bg-opacity-50', 'text-yellow-300');
+                resultDiv.innerHTML = `
+                    <p class="font-bold text-lg mb-2">The Oracle is confused:</p>
+                    <p class="text-sm">${error.message}</p>
+                `;
+                console.error("Analysis Error:", error);
+            } finally {
+                // Ensure UI state is reset
+                statusDiv.classList.add('hidden');
+                dropZone.classList.remove('hidden');
+            }
+        }
+
+        function setupDragDrop() {
+            const dropZone = document.getElementById('dropzone');
+            const fileInput = document.getElementById('file-upload');
+
+            // Prevent default drag behaviors
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            // Highlight drop zone when item is dragged over
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+            });
+
+            // Handle dropped files
+            dropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            }, false);
+
+            // Handle file input change
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+        }
+
+        window.onload = setupDragDrop;
+    </script>
+</head>
+<body>
+
+    <div class="container p-8 rounded-xl card transition-all">
+        <header class="text-center mb-8">
+            <!-- Mystical Crystal Ball Icon (Inline SVG) -->
+            <svg class="w-16 h-16 mx-auto mb-4 text-violet-400 glow-text" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/>
+                <path fill="#3498db" d="M12 4c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10.5L9.5 12 12 9.5 14.5 12 12 14.5z"/>
+            </svg>
+            <h1 class="text-4xl font-extrabold tracking-tight glow-text text-transparent bg-clip-text bg-gradient-to-r from-violet-300 to-blue-300">
+                The Oracle of Images
+            </h1>
+            <p class="text-gray-400 mt-2">Ask the Magic Crystal Ball to find secret messages!</p>
+        </header>
+
+        <!-- Drop Zone / Input -->
+        <div id="dropzone" class="dropzone p-10 text-center rounded-lg cursor-pointer hover:bg-opacity-20 transition-colors">
+            <input type="file" id="file-upload" class="hidden" accept="image/png">
+            <label for="file-upload" class="cursor-pointer flex flex-col items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-12 h-12 text-gray-400 mb-3">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l1.5-1.5m1.5 1.5l1.5-1.5m1.5 1.5l1.5-1.5m1.5 1.5l1.5-1.5m-6-3l-1.5-1.5m1.5 1.5l1.5-1.5m1.5 1.5l1.5-1.5m1.5 1.5l1.5-1.5M12 18.75V21m-4.5-9H3.375c-.621 0-1.125.504-1.125 1.125v4.5c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-4.5c0-.621-.504-1.125-1.125-1.125H16.5m0 0a2.25 2.25 0 00-2.25 2.25V15h3.75v-2.25a2.25 2.25 0 00-2.25-2.25z" />
+                </svg>
+                <p class="text-lg font-semibold text-gray-200">Drag or Click to give the Oracle a Magic Picture (PNG recommended)!</p>
+            </label>
+        </div>
+
+        <!-- Status Indicator -->
+        <div id="status" class="hidden text-center p-4 rounded-lg bg-yellow-900 bg-opacity-30 text-yellow-300 font-semibold mb-6 glow-text">
+            Gazing deep into the picture's secrets...
+        </div>
+
+        <!-- Results Display -->
+        <div class="mt-8">
+            <h2 class="text-xl font-bold mb-3 border-b border-gray-700 pb-2">The Revelation:</h2>
+            <div id="result" class="result-box p-4 rounded-lg bg-opacity-10 text-gray-400 transition-colors">
+                <p>Upload a picture to see if it holds a hidden secret!</p>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
+

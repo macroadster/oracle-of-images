@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Magic Quill</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the Mystical Oracle theme (reused) */
+        :root {
+            --color-primary: #8e44ad; /* Deep Purple */
+            --color-secondary: #3498db; /* Blue/Mystical Teal */
+            --color-background: #190a2a; /* Very Dark Purple/Space */
+            --color-text: #ecf0f1; /* Off-white / Silver */
+            --color-card: #2c1a40; /* Darker card background */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--color-background);
+            color: var(--color-text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at center, #301947 0%, var(--color-background) 100%);
+        }
+        .container {
+            max-width: 90%;
+            width: 768px;
+        }
+        .card {
+            background-color: var(--color-card);
+            border: 4px solid var(--color-primary);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.7);
+            filter: drop-shadow(0 0 15px rgba(142, 68, 173, 0.6));
+        }
+        .dropzone {
+            border: 3px dashed var(--color-secondary);
+            transition: background-color 0.2s, border-color 0.2s;
+            background-color: #3b2857;
+        }
+        .dropzone.dragover {
+            background-color: #5d3f82;
+            border-color: #ffffff;
+        }
+        .glow-text {
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+        }
+        .btn-magic {
+            background-color: var(--color-secondary);
+            color: var(--color-background);
+            font-weight: bold;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .btn-magic:hover {
+            background-color: #5dace7;
+            box-shadow: 0 0 10px var(--color-secondary);
+        }
+        .btn-magic:active {
+            transform: scale(0.98);
+        }
+        /* Custom scrollbar for text area */
+        textarea::-webkit-scrollbar { width: 8px; }
+        textarea::-webkit-scrollbar-track { background: #1f1230; border-radius: 10px; }
+        textarea::-webkit-scrollbar-thumb { background: var(--color-primary); border-radius: 10px; }
+        textarea::-webkit-scrollbar-thumb:hover { background: #a260c2; }
+    </style>
+    <script>
+        // --- Core Steganography Logic for EMBEDDING ---
+
+        // LSB-first bit representation of "AI42" (The secret key)
+        const HINT_BITS = "10000010100100100010110001001100";
+        // The null terminator (to signal the end of the message)
+        const TERMINATOR_BITS = "00000000";
+
+        let currentImageData = null;
+        let originalImageWidth = 0;
+        let originalImageHeight = 0;
+        let currentDataUrl = ''; // Store the generated Data URL here
+
+        /**
+         * Converts a UTF-8 string message into a binary bit string, including the prefix and terminator.
+         * The bits are ordered LSB-first within each byte, matching the extractor's expectation.
+         * @param {string} message - The secret text message.
+         * @returns {string} The full bit stream.
+         */
+        function messageToBitStream(message) {
+            // 1. Convert message to UTF-8 bytes
+            const encoder = new TextEncoder();
+            const payloadBytes = encoder.encode(message);
+
+            // Initialize bit string with the LSB-first Hint
+            let bitStream = HINT_BITS;
+
+            // 2. Process payload bytes
+            for (const byte of payloadBytes) {
+                // Convert byte to 8-bit string, then reverse it (LSB-first order)
+                const byteStr = byte.toString(2).padStart(8, '0');
+                const reversedByteStr = byteStr.split('').reverse().join('');
+                bitStream += reversedByteStr;
+            }
+
+            // 3. Append the LSB-first Terminator
+            bitStream += TERMINATOR_BITS;
+            
+            return bitStream;
+        }
+
+        /**
+         * Converts a File object into a Uint8ClampedArray of pixel data (RGBA) and stores dimensions.
+         * @param {File} file - The uploaded image file.
+         * @returns {Promise<Uint8ClampedArray>} The pixel data array.
+         */
+        function getImageData(file) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        originalImageWidth = img.width;
+                        originalImageHeight = img.height;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                        resolve(imageData.data);
+                    } catch (error) {
+                        reject(new Error("Cannot use this picture for the secret message."));
+                    }
+                };
+                img.onerror = (e) => reject(new Error("Failed to load image. Make sure it's a valid PNG."));
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        /**
+         * Core function to embed the bitstream into the Alpha channel of the pixel data.
+         * @param {Uint8ClampedArray} data - The raw pixel data (R, G, B, A...).
+         * @param {string} bitStream - The sequence of bits to embed.
+         * @returns {Uint8ClampedArray} The modified pixel data.
+         */
+        function embedMessageInImageData(data, bitStream) {
+            const maxCapacity = Math.floor(data.length / 4); // One bit per Alpha channel
+            const requiredBits = bitStream.length;
+            
+            if (requiredBits > maxCapacity) {
+                const maxLetters = Math.floor((maxCapacity - HINT_BITS.length) / 8); 
+                throw new Error(`The secret message is too long! Max letters: ${maxLetters}.`);
+            }
+
+            const modifiedData = new Uint8ClampedArray(data);
+            let bitIndex = 0;
+
+            // Iterate over only the Alpha channel (index 3, 7, 11, ...)
+            for (let i = 3; i < modifiedData.length; i += 4) {
+                if (bitIndex < requiredBits) {
+                    const bit = parseInt(bitStream[bitIndex], 10);
+                    // Clear the LSB (AND with 0xFE) and set the new bit (OR with bit)
+                    modifiedData[i] = (modifiedData[i] & 0xFE) | bit;
+                    bitIndex++;
+                } else {
+                    // Stop embedding once the message is complete
+                    break;
+                }
+            }
+            return modifiedData;
+        }
+
+        /**
+         * Creates a data URL from the modified pixel data and stores it.
+         * @param {Uint8ClampedArray} data - The modified pixel data.
+         * @param {number} width - Original image width.
+         * @param {number} height - Original image height.
+         */
+        function finalizeSecretImage(data, width, height) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            const imageData = new ImageData(data, width, height);
+            ctx.putImageData(imageData, 0, 0);
+
+            // Store the data URL globally
+            currentDataUrl = canvas.toDataURL("image/png");
+        }
+
+        // The copyToClipboard function is now removed as requested.
+
+        // --- UI and Orchestration ---
+
+        function updateCapacityIndicator(message) {
+            const indicator = document.getElementById('capacityIndicator');
+            // Calculate capacity based on pixel data length (R, G, B, A, so / 4)
+            const maxCapacity = Math.floor(currentImageData?.length / 4);
+            // Subtract hint (32 bits) and terminator (8 bits), then divide by 8 bits per byte
+            const maxLetters = Math.floor((maxCapacity - (HINT_BITS.length + TERMINATOR_BITS.length)) / 8); 
+
+            if (!currentImageData) {
+                indicator.textContent = "Upload a picture first to see the limit!";
+                indicator.className = 'text-gray-400 text-sm mt-1';
+                return;
+            }
+            
+            const messageBytes = new TextEncoder().encode(message).length;
+            
+            if (messageBytes > maxLetters) {
+                indicator.textContent = `🚨 Too big! Remove ${messageBytes - maxLetters} letters.`;
+                indicator.className = 'text-red-500 font-bold text-sm mt-1';
+                document.getElementById('embedButton').disabled = true;
+            } else {
+                indicator.textContent = `Letters used: ${messageBytes} / Max: ${maxLetters}.`;
+                indicator.className = 'text-green-400 font-bold text-sm mt-1';
+                document.getElementById('embedButton').disabled = false;
+            }
+        }
+
+        async function handleEmbed(event) {
+            event.preventDefault();
+            const message = document.getElementById('messageInput').value.trim();
+            const statusDiv = document.getElementById('status');
+            const resultSection = document.getElementById('resultSection');
+            
+            // Hide previous results/downloads and show processing status
+            resultSection.classList.add('hidden');
+            statusDiv.classList.remove('hidden');
+            statusDiv.textContent = "Casting the inscription spell...";
+            statusDiv.className = 'p-4 rounded-lg bg-yellow-900 bg-opacity-30 text-yellow-300 font-semibold mt-6 mb-6';
+
+            if (!currentImageData || !originalImageWidth || !originalImageHeight) {
+                statusDiv.textContent = "Error: Please upload a picture first!";
+                return;
+            }
+
+            if (!message) {
+                statusDiv.textContent = "Error: Don't forget your secret message!";
+                return;
+            }
+
+            try {
+                // 1. Get the full bitstream
+                const bitStream = messageToBitStream(message);
+                
+                // 2. Embed the message
+                const modifiedData = embedMessageInImageData(currentImageData, bitStream);
+                
+                // 3. Create the data URL and store it
+                finalizeSecretImage(modifiedData, originalImageWidth, originalImageHeight);
+                
+                // 4. Update UI to show result
+                document.getElementById('embeddedImagePreview').src = currentDataUrl;
+                document.getElementById('embedForm').classList.add('hidden');
+                
+                // Show the result section
+                resultSection.classList.remove('hidden');
+
+                // 5. Final status update
+                statusDiv.textContent = "Success! Your secret is sealed in the picture below. Download it if you know how!";
+                statusDiv.className = 'p-4 rounded-lg bg-green-900 bg-opacity-30 text-green-300 font-semibold mb-6';
+
+            } catch (error) {
+                statusDiv.textContent = `Magic failed: ${error.message}`;
+                statusDiv.className = 'p-4 rounded-lg bg-red-900 bg-opacity-30 text-red-300 font-semibold mb-6';
+                console.error("Embedding Error:", error);
+                
+                // Re-show form if error occurred
+                document.getElementById('embedForm').classList.remove('hidden'); 
+            }
+        }
+
+        async function handleFileUpload(file) {
+            const dropZone = document.getElementById('dropzone');
+            const fileStatus = document.getElementById('fileStatus');
+            const embedForm = document.getElementById('embedForm');
+            const resultSection = document.getElementById('resultSection');
+            
+            // Reset state
+            embedForm.classList.add('hidden');
+            resultSection.classList.add('hidden');
+            currentDataUrl = ''; // Clear previous data URL
+
+            if (!file || !file.type.match('image/png')) {
+                fileStatus.textContent = "Please upload a PNG picture (it's the only one that holds the magic)!";
+                currentImageData = null;
+                updateCapacityIndicator("");
+                return;
+            }
+            
+            dropZone.classList.add('hidden');
+            fileStatus.textContent = "Picture loaded! Calculating the space for your secret...";
+            fileStatus.classList.remove('hidden');
+
+            try {
+                currentImageData = await getImageData(file);
+                fileStatus.textContent = `Picture: ${file.name} loaded. Ready to write your secret!`;
+                
+                // Update capacity indicator based on the loaded image size
+                updateCapacityIndicator(document.getElementById('messageInput').value);
+
+                embedForm.classList.remove('hidden');
+
+            } catch (error) {
+                fileStatus.textContent = `Error loading image: ${error.message}`;
+                currentImageData = null;
+            } finally {
+                if (!currentImageData) {
+                     dropZone.classList.remove('hidden');
+                }
+            }
+        }
+
+
+        function setupUI() {
+            const dropZone = document.getElementById('dropzone');
+            const fileInput = document.getElementById('file-upload');
+            const messageInput = document.getElementById('messageInput');
+            const embedForm = document.getElementById('embedForm');
+            // copyButton removed from here
+
+            // Event listeners for file drag and drop
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+            });
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+            });
+            dropZone.addEventListener('drop', (e) => {
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFileUpload(files[0]);
+                }
+            }, false);
+
+            // File input change
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileUpload(e.target.files[0]);
+                }
+            });
+
+            // Message input change (for capacity update)
+            messageInput.addEventListener('input', () => {
+                updateCapacityIndicator(messageInput.value);
+            });
+
+            // Form submission
+            embedForm.addEventListener('submit', handleEmbed);
+
+            // Copy button click listener removed
+            
+            // Initialize capacity indicator state
+            updateCapacityIndicator("");
+        }
+
+        window.onload = setupUI;
+    </script>
+</head>
+<body>
+
+    <div class="container p-8 rounded-xl card transition-all">
+        <header class="text-center mb-8">
+            <!-- Mystical Quill Icon (Inline SVG) -->
+            <svg class="w-16 h-16 mx-auto mb-4 text-violet-400 glow-text" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16 2.01L6 12L12 18L22 8V2L16 2.01zM11 19.99H2V22H11V19.99z"/>
+            </svg>
+            <h1 class="text-4xl font-extrabold tracking-tight glow-text text-transparent bg-clip-text bg-gradient-to-r from-violet-300 to-blue-300">
+                The Magic Quill
+            </h1>
+            <p class="text-gray-400 mt-2">Write your secret message inside a picture!</p>
+        </header>
+
+        <!-- Step 1: Image Upload -->
+        <h2 class="text-xl font-bold mb-3 border-b border-gray-700 pb-2">1. Choose Your Magic Picture</h2>
+        <div id="dropzone" class="dropzone p-8 text-center rounded-lg cursor-pointer hover:bg-opacity-20 transition-colors mb-4">
+            <input type="file" id="file-upload" class="hidden" accept="image/png">
+            <label for="file-upload" class="cursor-pointer flex flex-col items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-12 h-12 text-gray-400 mb-2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                </svg>
+                <p class="text-lg font-semibold text-gray-200">Drag a Picture Here or Click to Find One</p>
+                <p class="text-sm text-gray-500 mt-1">✨ Only PNG files will hold the secret magic! ✨</p>
+            </label>
+        </div>
+        
+        <div id="fileStatus" class="hidden text-center p-3 rounded-lg bg-indigo-900 bg-opacity-30 text-indigo-300 font-semibold mb-6">
+            Picture loaded! Calculating the space for your secret...
+        </div>
+
+        <!-- Step 2: Message Input and Embedding -->
+        <form id="embedForm" class="hidden" onsubmit="handleEmbed(event)">
+            <h2 class="text-xl font-bold mb-3 border-b border-gray-700 pb-2">2. Write Your Secret</h2>
+            <textarea 
+                id="messageInput" 
+                placeholder="Type your secret message here... only your friend who knows The Oracle of Images can read it!" 
+                class="w-full h-32 p-3 rounded-lg bg-gray-800 text-gray-100 border-2 border-violet-500 focus:outline-none focus:border-blue-400 resize-none"
+                maxlength="5000"
+            ></textarea>
+            <p id="capacityIndicator" class="text-gray-400 text-sm mt-1 mb-4">Upload a picture first to see the limit!</p>
+
+            <button type="submit" id="embedButton" class="btn-magic w-full py-3 rounded-xl shadow-lg transition-all" disabled>
+                Cast the Secret-Writing Spell!
+            </button>
+        </form>
+
+        <!-- Result Section (Hidden until successful embed) -->
+        <div id="resultSection" class="hidden mt-6 text-center">
+            <h2 class="text-xl font-bold mb-3 border-b border-gray-700 pb-2">3. Your Sealed Secret!</h2>
+            
+            <div id="status" class="p-4 rounded-lg bg-green-900 bg-opacity-30 text-green-300 font-semibold mb-6">
+                Success! Your secret is sealed in the picture below. Download it if you know how!
+            </div>
+
+            <p class="text-gray-400 mb-4">This picture now holds your secret message. Send this exact file to your friend!</p>
+            <img id="embeddedImagePreview" class="mx-auto rounded-xl border-4 border-violet-500 max-w-full h-auto shadow-2xl mb-8" style="max-height: 400px; object-fit: contain; cursor: pointer;" alt="Embedded Secret Image">
+            
+            <!-- Removed the Copy Data URL button as requested -->
+
+            <p class="text-gray-500 text-xs mt-4 max-w-md mx-auto">
+                **HINT:** Use your right-click menu or long-press on the image above to save the hidden file.
+            </p>
+            
+        </div>
+        
+    </div>
+
+</body>
+</html>
+
